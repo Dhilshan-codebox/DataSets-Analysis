@@ -39,7 +39,8 @@ with st.form("risk_form"):
 
     submitted = st.form_submit_button("Predict Risk")
 
-# Preprocess input and predict
+
+
 if submitted:
     if not name.strip():
         st.warning("Please enter the patient's name.")
@@ -59,7 +60,7 @@ if submitted:
 
         # Store in MongoDB
         record = {
-            "name": name,
+            "name": names,
             "age": age,
             "bmi": bmi,
             "blood_pressure": bp,
