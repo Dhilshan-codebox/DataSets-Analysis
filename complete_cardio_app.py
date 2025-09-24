@@ -1,170 +1,200 @@
-# complete_cardio_app.py (Corrected Version)
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import xgboost as xgb
+import os
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report
-from pymongo import MongoClient
-from datetime import datetime
-import os
 
-# --- PART 1: HELPER FUNCTIONS FOR DATA & MODEL ---
+import xgboost as xgb
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
 
+
+# -------------------------------
+# Generate Synthetic Data
+# -------------------------------
 def generate_data():
-    """Generates a synthetic CSV dataset for training."""
-    with st.spinner("Generating synthetic patient data..."):
-        n_samples = 2000
-        np.random.seed(42)
-        data = {
-            'age': np.random.randint(20, 90, n_samples),
-            'bmi': np.random.uniform(18, 50, n_samples),
-            'bp': np.random.randint(90, 200, n_samples),
-            'glucose': np.random.randint(70, 300, n_samples),
-            'cholesterol': np.random.randint(120, 350, n_samples),
-            'smoking': np.random.choice([0, 1], n_samples, p=[0.7, 0.3]),
-            'diabetes_duration': np.random.randint(0, 40, n_samples)
-        }
-        df = pd.DataFrame(data)
-        probability = (df['age']/90 + df['bmi']/50 + df['bp']/200 + df['glucose']/300 + df['cholesterol']/350 + df['smoking'] + df['diabetes_duration']/40) / 7
-        df['risk'] = (probability > np.random.uniform(0.3, 0.7, n_samples)).astype(int)
-        df.to_csv('cardio_data.csv', index=False)
-    st.success("✅ `cardio_data.csv` generated successfully!")
-    st.info(f"Generated {n_samples} samples. Here's a preview:")
+    """Generates synthetic dataset with all 12 features."""
+    st.info("Generating synthetic cardio dataset with all 12 features...")
+    np.random.seed(42)
+    n_samples = 3000
+
+    df = pd.DataFrame({
+        "age": np.random.randint(30*365, 70*365, n_samples),   # in days
+        "height": np.random.randint(150, 200, n_samples),
+        "weight": np.random.randint(50, 120, n_samples),
+        "gender": np.random.choice([1, 2], n_samples),         # 1=female, 2=male
+        "ap_hi": np.random.randint(90, 200, n_samples),        # systolic
+        "ap_lo": np.random.randint(60, 120, n_samples),        # diastolic
+        "cholesterol": np.random.choice([1, 2, 3], n_samples, p=[0.6, 0.25, 0.15]),
+        "gluc": np.random.choice([1, 2, 3], n_samples, p=[0.7, 0.2, 0.1]),
+        "smoke": np.random.choice([0, 1], n_samples, p=[0.8, 0.2]),
+        "alco": np.random.choice([0, 1], n_samples, p=[0.85, 0.15]),
+        "active": np.random.choice([0, 1], n_samples, p=[0.6, 0.4])
+    })
+
+    # simple probability of cardiovascular disease
+    risk_factor = (
+        (df["age"]/365 > 50).astype(int) +
+        (df["ap_hi"] > 140).astype(int) +
+        (df["cholesterol"] > 1).astype(int) +
+        (df["gluc"] > 1).astype(int) +
+        df["smoke"] + df["alco"] + (1-df["active"])
+    )
+    df["cardio"] = (risk_factor >= 3).astype(int)
+
+    df.to_csv("cardio_data.csv", index=False)
+    st.success("✅ `cardio_data.csv` generated successfully with 3000 rows.")
     st.dataframe(df.head())
 
-def train_model():
-    """Loads data, trains an XGBoost model, and saves it."""
-    if not os.path.exists('cardio_data.csv'):
+
+# -------------------------------
+# Train Model Function
+# -------------------------------
+def train_model(model_type="xgboost"):
+    if not os.path.exists("cardio_data.csv"):
         st.error("⚠️ `cardio_data.csv` not found. Please generate data first.")
         return
 
-    with st.spinner("Training the model... This may take a moment."):
-        df = pd.read_csv('cardio_data.csv')
-        
-        features = ['age', 'bmi', 'bp', 'glucose', 'cholesterol', 'smoking', 'diabetes_duration']
-        target = 'risk'
-        X = df[features]
-        y = df[target]
+    df = pd.read_csv("cardio_data.csv")
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-        
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+    features = ['age','height','weight','gender','ap_hi','ap_lo',
+                'cholesterol','gluc','smoke','alco','active']
+    target = 'cardio'
 
-        model = xgb.XGBClassifier(
-            objective='binary:logistic', eval_metric='logloss', use_label_encoder=False,
-            n_estimators=100, learning_rate=0.1, max_depth=5, random_state=42
-        )
-        model.fit(X_train_scaled, y_train)
-        
-        y_pred = model.predict(X_test_scaled)
-        accuracy = accuracy_score(y_test, y_pred)
-        
-        st.success("✅ Model training complete!")
-        st.metric(label="Model Accuracy on Test Set", value=f"{accuracy * 100:.2f}%")
-        
-        report = classification_report(y_test, y_pred, target_names=['Low Risk', 'High Risk'], output_dict=True)
-        st.text("Classification Report:")
-        st.dataframe(pd.DataFrame(report).transpose())
+    # ensure dataset has these features
+    missing = [col for col in features+[target] if col not in df.columns]
+    if missing:
+        st.error(f"Dataset is missing columns: {missing}")
+        return
 
-        joblib.dump(model, 'cardio_risk_model.pkl')
-        joblib.dump(scaler, 'scaler.pkl')
-        st.success("✅ Model (`cardio_risk_model.pkl`) and Scaler (`scaler.pkl`) saved.")
-        st.balloons()
+    X = df[features].copy()
+    y = df[target]
 
-def load_artifacts():
-    """Loads the trained model and scaler from disk."""
-    try:
-        model = joblib.load('cardio_risk_model.pkl')
-        scaler = joblib.load('scaler.pkl')
-        return model, scaler
-    except FileNotFoundError:
-        return None, None
+    # scale continuous only
+    continuous = ['age','height','weight','ap_hi','ap_lo']
+    scaler = StandardScaler()
+    X[continuous] = scaler.fit_transform(X[continuous])
 
-def setup_mongodb():
-    """Sets up and returns a connection to the MongoDB collection."""
-    MONGO_URI = "mongodb://localhost:27017/cardio_db"
-    try:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        client.server_info()
-        db = client['cardio_db']
-        collection = db['risk_predictions']
-        return collection
-    except Exception:
-        st.error("⚠️ Could not connect to MongoDB. Predictions will not be saved.")
-        return None
+    joblib.dump((scaler, continuous), "scaler.pkl")
 
-# --- PART 2: STREAMLIT USER INTERFACE ---
+    # split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
 
-st.set_page_config(page_title="CardioRiskPredict", layout="wide")
+    if model_type == "xgboost":
+        with st.spinner("Training XGBoost model..."):
+            model = xgb.XGBClassifier(
+                objective="binary:logistic", eval_metric="logloss",
+                n_estimators=300, learning_rate=0.05, max_depth=6,
+                subsample=0.8, colsample_bytree=0.8,
+                scale_pos_weight=len(y_train[y_train==0]) / len(y_train[y_train==1]),
+                random_state=42
+            )
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
 
-st.sidebar.title("🛠️ Admin Panel")
-st.sidebar.header("Data & Model Management")
+            st.success("✅ XGBoost training complete!")
+            st.metric("Accuracy", f"{acc*100:.2f}%")
+            st.dataframe(pd.DataFrame(
+                classification_report(y_test, y_pred, output_dict=True)
+            ).transpose())
 
-if st.sidebar.button("Step 1: Generate Sample Data"):
+            joblib.dump(model, "cardio_risk_model.pkl")
+
+    else:
+        with st.spinner("Training TensorFlow model..."):
+            model = Sequential([
+                Dense(64, activation="relu", input_shape=(X_train.shape[1],)),
+                Dropout(0.3),
+                Dense(32, activation="relu"),
+                Dense(1, activation="sigmoid")
+            ])
+            model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+            model.fit(X_train, y_train, epochs=30, batch_size=32, validation_split=0.2, verbose=0)
+
+            loss, acc = model.evaluate(X_test, y_test, verbose=0)
+            st.success("✅ TensorFlow training complete!")
+            st.metric("Accuracy", f"{acc*100:.2f}%")
+
+            model.save("cardio_risk_tf_model.h5")
+
+
+# -------------------------------
+# Streamlit UI
+# -------------------------------
+st.set_page_config(page_title="Cardiovascular Risk Predictor", layout="centered")
+st.title("🩺 Cardiovascular Risk Prediction App")
+
+menu = ["Generate Data","Train Model", "Predict Risk"]
+choice = st.sidebar.selectbox("Navigation", menu)
+
+if choice == "Generate Data":
     generate_data()
 
-if st.sidebar.button("Step 2: Train New Model"):
-    train_model()
-    
-st.sidebar.markdown("---")
-st.sidebar.info("First, generate data. Then, train the model. The prediction app will become active once the model is trained.")
+elif choice == "Train Model":
+    model_type = st.radio("Choose Model Type:", ("xgboost", "tensorflow"))
+    if st.button("Train Model"):
+        train_model(model_type)
 
-st.title("CardioRiskPredict: Cardiovascular Risk Prediction for Diabetics")
-st.write("Enter patient data to assess cardiovascular risk. If the form is disabled, please use the admin panel to train a model first.")
+elif choice == "Predict Risk":
+    st.header("🔮 Predict Cardiovascular Risk")
 
-model, scaler = load_artifacts()
-collection = setup_mongodb()
-
-if model is None or scaler is None:
-    st.warning("Model not found. Please train a model using the 'Admin Panel' in the sidebar.")
-else:
-    st.success("✅ Model loaded successfully. Ready for predictions.")
     with st.form("risk_form"):
-        name = st.text_input("Enter Patient Name")
-        age = st.number_input("Age", min_value=20, max_value=90, value=50)
-        bmi = st.number_input("BMI", min_value=10.0, max_value=60.0, value=25.0, format="%.2f")
-        bp = st.number_input("Blood Pressure (Systolic)", min_value=70, max_value=250, value=120)
-        glucose = st.number_input("Blood Glucose Level", min_value=50, max_value=400, value=100)
-        cholesterol = st.number_input("Cholesterol Level", min_value=100, max_value=400, value=200)
-        smoking_option = st.selectbox("Smoking Status", ["Non-Smoker", "Smoker"])
-        diabetes_duration = st.number_input("Duration of Diabetes (Years)", min_value=0, max_value=40, value=5)
-        
-        submitted = st.form_submit_button("Predict Risk")
+        name = st.text_input("Patient Name")
+        age = st.number_input("Age (years)", 20, 90, 50) * 365
+        height = st.number_input("Height (cm)", 120, 220, 170)
+        weight = st.number_input("Weight (kg)", 30, 200, 70)
+        gender = 1 if st.selectbox("Gender", ["Female","Male"])=="Female" else 2
+        ap_hi = st.number_input("Systolic BP", 80, 250, 120)
+        ap_lo = st.number_input("Diastolic BP", 50, 150, 80)
+        cholesterol = {"Normal":1,"Above Normal":2,"Well Above Normal":3}[st.selectbox("Cholesterol",["Normal","Above Normal","Well Above Normal"])]
+        gluc = {"Normal":1,"Above Normal":2,"Well Above Normal":3}[st.selectbox("Glucose",["Normal","Above Normal","Well Above Normal"])]
+        smoke = 1 if st.selectbox("Smoking",["No","Yes"])=="Yes" else 0
+        alco = 1 if st.selectbox("Alcohol Intake",["No","Yes"])=="Yes" else 0
+        active = 1 if st.selectbox("Physical Activity",["Inactive","Active"])=="Active" else 0
+        submitted = st.form_submit_button("Predict")
 
     if submitted:
-        if not name.strip():
-            st.warning("Please enter the patient's name.")
-        else:
-            smoking_val = 1 if smoking_option == "Smoker" else 0
-            features = np.array([[age, bmi, bp, glucose, cholesterol, smoking_val, diabetes_duration]])
-            scaled_features = scaler.transform(features)
-            
-            prediction = model.predict(scaled_features)
-            risk_proba = model.predict_proba(scaled_features)[0][1] # Probability of 'High Risk'
-            risk_label = "High Risk" if prediction[0] == 1 else "Low Risk"
-
-            st.write(f"---")
-            st.write(f"### Prediction for {name}")
-            
-            if prediction[0] == 1:
-                st.error(f"Prediction: **{risk_label}** ⚠️")
+        try:
+            # load model
+            if os.path.exists("cardio_risk_model.pkl"):
+                model = joblib.load("cardio_risk_model.pkl")
+                model_type = "xgboost"
+            elif os.path.exists("cardio_risk_tf_model.h5"):
+                from tensorflow.keras.models import load_model
+                model = load_model("cardio_risk_tf_model.h5")
+                model_type = "tensorflow"
             else:
-                st.success(f"Prediction: **{risk_label}** ✅")
+                st.error("No trained model found.")
+                st.stop()
 
-            st.progress(int(risk_proba * 100)) # <-- THIS LINE IS FIXED
-            st.write(f"Probability of High Risk: **{risk_proba*100:.2f}%**")
+            scaler, continuous = joblib.load("scaler.pkl")
 
-            if collection is not None:
-                record = {
-                    "name": name, "age": age, "bmi": bmi, "blood_pressure": bp, "glucose": glucose,
-                    "cholesterol": cholesterol, "smoking": smoking_option, "diabetes_duration": diabetes_duration,
-                    "risk_prediction": risk_label, "risk_probability": float(risk_proba), "timestamp": datetime.now()
-                }
-                collection.insert_one(record)
-                st.info("Patient data and prediction saved to database 🗂️")
+            features = pd.DataFrame([[age,height,weight,gender,ap_hi,ap_lo,
+                                      cholesterol,gluc,smoke,alco,active]],
+                                    columns=['age','height','weight','gender',
+                                             'ap_hi','ap_lo','cholesterol','gluc',
+                                             'smoke','alco','active'])
+            features[continuous] = scaler.transform(features[continuous])
+
+            if model_type=="xgboost":
+                pred = model.predict(features)[0]
+                proba = model.predict_proba(features)[0][1]
+            else:
+                proba = model.predict(features)[0][0]
+                pred = int(proba>=0.5)
+
+            st.subheader("Result")
+            st.write(f"👤 Patient: {name if name else 'Anonymous'}")
+            if pred==1:
+                st.error(f"⚠️ High Risk ({proba*100:.2f}%)")
+            else:
+                st.success(f"✅ Low Risk ({(1-proba)*100:.2f}%)")
+        except Exception as e:
+            st.error(f"Error: {e}")
