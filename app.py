@@ -11,8 +11,6 @@ try:
 except Exception as e:
     st.error("⚠️ Error loading model or scaler files.")
     st.stop()
-
-# MongoDB setup
 MONGO_URI = "mongodb://localhost:27017/cardio_db"
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
