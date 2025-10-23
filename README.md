@@ -1,9 +1,6 @@
 # Data-Sets-Analysis
 # 🩺 Cardiovascular Risk Prediction System
 
-![App Preview](https://raw.githubusercontent.com/<your-username>/<repo-name>/main/preview.png)
-> *(Replace the above link with your uploaded dashboard screenshot in the repository — e.g., `app_screenshot.png`)*
-
 An **AI-powered Streamlit web application** that predicts the **risk of cardiovascular disease** using machine learning models like **XGBoost** and **TensorFlow**.  
 The app provides personalized predictions, data visualizations, health advice, and feature importance analysis — all in an intuitive interface.
 
@@ -53,5 +50,5 @@ The model (`cardio_risk_model.pkl`) is trained using:
 
 ### 1️⃣ Clone this Repository
 ```bash
-git clone https://github.com/<your-username>/<repo-name>.git
-cd <repo-name>
+https://github.com/Dhilshan-codebox/DataSets-Analysis.git
+cd DataSets-Analysis
